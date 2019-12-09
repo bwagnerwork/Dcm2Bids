@@ -10,8 +10,10 @@ from fnmatch import fnmatch
 from fnmatch import filter as fnfilter
 from future.utils import iteritems
 from .structure import Acquisition
-from .utils import DEFAULT, load_json, save_json, splitext_
+from .utils import DEFAULT, load_json, save_json, splitext_, is_numeric
 
+import nibabel
+import math
 
 class Sidecar(object):
     """ A sidecar object
@@ -80,6 +82,29 @@ class Sidecar(object):
             data = load_json(filename)
         except:
             data = {}
+
+        nii = None
+        if os.path.isfile(filename.replace('.json','.nii.gz')):
+            nii = filename.replace('.json','.nii.gz')
+        elif os.path.isfile(filename.replace('.json','.nii')):
+            nii = filename.replace('.json','.nii')
+
+        if nii:
+            img = nibabel.load(nii)
+            for k in img.header.keys():
+                tmp_v = img.header.get(k).tolist()
+                if isinstance(tmp_v, list) and len(tmp_v) == 1:
+                    tmp_v = tmp_v[0]
+                data['nii_' + k] = tmp_v
+                    
+                if isinstance(data['nii_' + k], bytes):
+                    data['nii_' + k] = data['nii_' + k].decode('ASCII')
+                if is_numeric(data['nii_' + k]) and math.isnan(data['nii_' + k]):
+                    data['_nii_' + k] = 'Value initially {}, but set to 0 '\
+                                        '(not null) for BIDS-validator '\
+                                        'compliance'.format(data['nii_' + k])
+                    data['nii_' + k] = 0
+
         self._origData = data.copy()
         data["SidecarFilename"] = os.path.basename(filename)
         self._data = data
@@ -162,7 +187,15 @@ class SidecarPairing(object):
             boolean
         """
         def compare(name, pattern):
-            if self.searchMethod == "re":
+            if is_numeric(name) and is_numeric(pattern):
+                return name == pattern
+            elif is_numeric(name) \
+                 and isinstance(pattern, list) \
+                 and len(pattern) == 2 \
+                 and is_numeric(pattern[0]) \
+                 and is_numeric(pattern[1]):
+                return (name >= pattern[0] and name <= pattern[1])
+            elif self.searchMethod == "re":
                 return bool(re.search(pattern, str(name)))
             else:
                 return fnmatch(str(name), str(pattern))
@@ -199,7 +232,9 @@ class SidecarPairing(object):
                 return False
 
         result = []
+        tags = []
         for tag, pattern in iteritems(criteria):
+            tags.append(tag)
             name = data.get(tag)
             if isinstance(pattern, dict):
                 result.append(compare_complex(name, pattern))
@@ -207,6 +242,16 @@ class SidecarPairing(object):
                 result.append(compare_list(name, pattern))
             else:
                 result.append(compare(name, pattern))
+        if True and 'ProtocolName' in criteria and result[list(criteria).index('ProtocolName')]:
+            print('-'*80)
+            print(data.get('SidecarFilename'))
+            # print(criteria)
+            for t,r in list(zip(tags,result)):
+                if r:
+                    print('Match  {}: {}'.format(t, criteria.get(t)))
+                else:
+                    print('Failed {}: {}'.format(t, criteria.get(t)))
+                    print('   got {}: {}'.format(t, data.get(t)))
         return all(result)
 
 
