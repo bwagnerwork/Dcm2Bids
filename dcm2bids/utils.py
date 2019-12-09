@@ -108,3 +108,12 @@ def run_shell_command(commandLine):
     logger = logging.getLogger(__name__)
     logger.info("Running {}".format(commandLine))
     return check_output(shlex.split(commandLine))
+
+def is_numeric(value):
+    """ Check if value is a numeric type (in, float, complex), 
+    but not bool.
+
+    Return: bool
+    """
+    return isinstance(value, (int, float, complex)) \
+           and not isinstance(value, bool)
